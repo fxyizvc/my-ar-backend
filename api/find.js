@@ -1,71 +1,97 @@
-// api/find.js
 const { MongoClient } = require('mongodb');
 
-// Your Connection String
+// Connection String
 const uri = "mongodb+srv://faisvc916_db_user:fayizvc123@cluster0.kqm7txf.mongodb.net/?retryWrites=true&w=majority";
-
 const client = new MongoClient(uri);
 
 export default async function handler(req, res) {
-  const { lat, lon } = req.query;
-
-  if (!lat || !lon) {
-    return res.status(400).json({ error: "Missing lat/lon" });
-  }
+  // We look for different parameters now
+  const { lat, lon, subject } = req.query;
 
   try {
     await client.connect();
     const db = client.db("arProjectDB");
-    
-    // ✅ CHANGE 1: Look in 'colleges' collection, not 'assets'
-    const collection = db.collection("colleges");
 
-    const documents = await collection.find({}).toArray();
+    // ============================================================
+    // MODE A: GPS CHECK (User is walking)
+    // ============================================================
+    if (lat && lon) {
+      const collection = db.collection("colleges");
+      const documents = await collection.find({}).toArray();
 
-    let minDistance = 500000;
-    let nearestDoc = null;
+      let minDistance = 500000;
+      let nearestCollege = null;
+      const userLat = parseFloat(lat);
+      const userLon = parseFloat(lon);
 
-    const userLat = parseFloat(lat);
-    const userLon = parseFloat(lon);
+      documents.forEach(doc => {
+        if (doc.coordinate) {
+          const parts = doc.coordinate.split(',');
+          if (parts.length >= 2) {
+            const dbLat = parseFloat(parts[0]);
+            const dbLon = parseFloat(parts[1]);
 
-    documents.forEach(doc => {
-      if (doc.coordinate) {
-        const parts = doc.coordinate.split(',');
-        if (parts.length >= 2) {
-          const dbLat = parseFloat(parts[0]);
-          const dbLon = parseFloat(parts[1]);
+            // Haversine Formula
+            const R = 6371000; 
+            const dLat = (dbLat - userLat) * (Math.PI / 180);
+            const dLon = (dbLon - userLon) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(userLat * (Math.PI / 180)) * Math.cos(dbLat * (Math.PI / 180)) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const distance = R * c;
 
-          const R = 6371000; 
-          const dLat = (dbLat - userLat) * (Math.PI / 180);
-          const dLon = (dbLon - userLon) * (Math.PI / 180);
-          const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                    Math.cos(userLat * (Math.PI / 180)) * Math.cos(dbLat * (Math.PI / 180)) *
-                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          const distance = R * c;
-
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestDoc = doc;
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestCollege = doc;
+            }
           }
         }
-      }
-    });
+      });
 
-    if (nearestDoc && minDistance < 500) {
-      res.status(200).json({
-        found: true,
-        // ✅ CHANGE 2: Read 'college_name' OR 'filename' (Matches your DB)
-        subject: nearestDoc.college_name || nearestDoc.filename || "Unknown",
-        glb: nearestDoc.glb_url || "",
-        pdf: nearestDoc.pdf_url || "",
-        distance: minDistance
+      if (nearestCollege && minDistance < 500) {
+        res.status(200).json({
+          found: true,
+          mode: "college_check",
+          college_name: nearestCollege.college_name || "Unknown College",
+          distance: minDistance
+        });
+      } else {
+        res.status(200).json({ found: false, mode: "college_check", distance: minDistance });
+      }
+    } 
+    
+    // ============================================================
+    // MODE B: ASSET SEARCH (User clicked SCAN)
+    // ============================================================
+    else if (subject) {
+      const collection = db.collection("assets");
+
+      // 1. Search for filename that CONTAINS the subject text (Case Insensitive)
+      // e.g. "CST402" will match "CST402.pdf" or "CST402"
+      // Note: We use $regex for partial matching
+      const asset = await collection.findOne({ 
+        filename: { $regex: subject, $options: 'i' } 
       });
-    } else {
-      res.status(200).json({
-        found: false,
-        distance: minDistance
-      });
+
+      if (asset) {
+        res.status(200).json({
+          found: true,
+          mode: "asset_search",
+          filename: asset.filename,
+          glb_url: asset.glb_url || "",
+          pdf_url: asset.pdf_url || ""
+        });
+      } else {
+        res.status(200).json({ 
+          found: false, 
+          mode: "asset_search", 
+          error: "Subject not found in database" 
+        });
+      }
+    }
+    else {
+      res.status(400).json({ error: "Provide lat/lon OR subject" });
     }
 
   } catch (error) {
