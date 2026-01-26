@@ -1,14 +1,12 @@
 // api/find.js
 const { MongoClient } = require('mongodb');
 
-// PASTE YOUR CONNECTION STRING HERE
-// Important: Use the "Standard" srv string from Atlas (Short one is fine here!)
+// Your Connection String
 const uri = "mongodb+srv://faisvc916_db_user:fayizvc123@cluster0.kqm7txf.mongodb.net/?retryWrites=true&w=majority";
 
 const client = new MongoClient(uri);
 
 export default async function handler(req, res) {
-  // 1. Get Coordinates from Unity
   const { lat, lon } = req.query;
 
   if (!lat || !lon) {
@@ -18,15 +16,15 @@ export default async function handler(req, res) {
   try {
     await client.connect();
     const db = client.db("arProjectDB");
-    const collection = db.collection("assets");
+    
+    // ✅ CHANGE 1: Look in 'colleges' collection, not 'assets'
+    const collection = db.collection("colleges");
 
-    // 2. Get ALL colleges
     const documents = await collection.find({}).toArray();
 
     let minDistance = 500000;
     let nearestDoc = null;
 
-    // 3. Calculate Distance (Haversine Formula)
     const userLat = parseFloat(lat);
     const userLon = parseFloat(lon);
 
@@ -37,7 +35,7 @@ export default async function handler(req, res) {
           const dbLat = parseFloat(parts[0]);
           const dbLon = parseFloat(parts[1]);
 
-          const R = 6371000; // Earth radius in meters
+          const R = 6371000; 
           const dLat = (dbLat - userLat) * (Math.PI / 180);
           const dLon = (dbLon - userLon) * (Math.PI / 180);
           const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -54,11 +52,11 @@ export default async function handler(req, res) {
       }
     });
 
-    // 4. Send Result back to Unity
     if (nearestDoc && minDistance < 500) {
       res.status(200).json({
         found: true,
-        subject: nearestDoc.filename || "Unknown",
+        // ✅ CHANGE 2: Read 'college_name' OR 'filename' (Matches your DB)
+        subject: nearestDoc.college_name || nearestDoc.filename || "Unknown",
         glb: nearestDoc.glb_url || "",
         pdf: nearestDoc.pdf_url || "",
         distance: minDistance
