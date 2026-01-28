@@ -1,10 +1,10 @@
+// Update: Testing Branch Filters
 const { MongoClient } = require('mongodb');
 
 const uri = "mongodb+srv://faisvc916_db_user:fayizvc123@cluster0.kqm7txf.mongodb.net/?retryWrites=true&w=majority";
 const client = new MongoClient(uri);
 
 export default async function handler(req, res) {
-  // 1. Read the new parameters from the URL
   const { lat, lon, subject, branch, semester } = req.query;
 
   try {
@@ -13,10 +13,13 @@ export default async function handler(req, res) {
 
     // --- MODE A: GPS CHECK ---
     if (lat && lon) {
+      // (Keep existing GPS logic here - no changes needed)
       const collection = db.collection("colleges");
       const documents = await collection.find({}).toArray();
-
-      let minDistance = 500000;
+      // ... [Keep your existing Haversine distance logic] ...
+      // For brevity, I'm assuming you keep the GPS code we wrote previously!
+      // If you need the full GPS block again, let me know.
+       let minDistance = 500000;
       let nearestCollege = null;
       const userLat = parseFloat(lat);
       const userLon = parseFloat(lon);
@@ -56,23 +59,22 @@ export default async function handler(req, res) {
       }
     } 
     
-    // --- MODE B: ASSET SEARCH (UPDATED) ---
+    // --- MODE B: ASSET SEARCH (UPDATED FILTER) ---
     else if (subject) {
       const collection = db.collection("assets");
 
-      // Build the Search Query
       let dbQuery = {
-        filename: { $regex: subject, $options: 'i' } // Always match name
+        filename: { $regex: subject, $options: 'i' } 
       };
 
-      // If Unity sends a specific branch (and it's not "All"), filter by it
+      // STRICT FILTER: Only return if branch/sem match
       if (branch && branch !== "All") {
-        dbQuery.branch = branch; 
+        // "regex" with "i" makes it Case Insensitive (CSE == cse)
+        dbQuery.branch = { $regex: new RegExp("^" + branch + "$", "i") };
       }
 
-      // If Unity sends a specific semester (and it's not "All"), filter by it
       if (semester && semester !== "All") {
-        dbQuery.semester = semester;
+        dbQuery.semester = { $regex: new RegExp("^" + semester + "$", "i") };
       }
 
       const asset = await collection.findOne(dbQuery);
@@ -84,19 +86,21 @@ export default async function handler(req, res) {
           filename: asset.filename,
           glb_url: asset.glb_url || "",
           pdf_url: asset.pdf_url || "",
-          branch: asset.branch || "",    // Send back for debugging
-          semester: asset.semester || "" // Send back for debugging
+          branch: asset.branch,
+          semester: asset.semester
         });
       } else {
+        // If filters don't match, we return false. 
+        // Unity will see this and NOT show the 3D card.
         res.status(200).json({ 
           found: false, 
           mode: "asset_search", 
-          error: "No matching subject found for this Branch/Semester." 
+          error: "No asset found for this Branch/Sem." 
         });
       }
     }
     else {
-      res.status(400).json({ error: "Provide lat/lon OR subject" });
+      res.status(400).json({ error: "Missing parameters" });
     }
 
   } catch (error) {
