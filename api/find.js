@@ -1,20 +1,17 @@
 const { MongoClient } = require('mongodb');
 
-// Connection String
 const uri = "mongodb+srv://faisvc916_db_user:fayizvc123@cluster0.kqm7txf.mongodb.net/?retryWrites=true&w=majority";
 const client = new MongoClient(uri);
 
 export default async function handler(req, res) {
-  // We look for different parameters now
-  const { lat, lon, subject } = req.query;
+  // 1. Read the new parameters from the URL
+  const { lat, lon, subject, branch, semester } = req.query;
 
   try {
     await client.connect();
     const db = client.db("arProjectDB");
 
-    // ============================================================
-    // MODE A: GPS CHECK (User is walking)
-    // ============================================================
+    // --- MODE A: GPS CHECK ---
     if (lat && lon) {
       const collection = db.collection("colleges");
       const documents = await collection.find({}).toArray();
@@ -30,8 +27,6 @@ export default async function handler(req, res) {
           if (parts.length >= 2) {
             const dbLat = parseFloat(parts[0]);
             const dbLon = parseFloat(parts[1]);
-
-            // Haversine Formula
             const R = 6371000; 
             const dLat = (dbLat - userLat) * (Math.PI / 180);
             const dLon = (dbLon - userLon) * (Math.PI / 180);
@@ -61,18 +56,26 @@ export default async function handler(req, res) {
       }
     } 
     
-    // ============================================================
-    // MODE B: ASSET SEARCH (User clicked SCAN)
-    // ============================================================
+    // --- MODE B: ASSET SEARCH (UPDATED) ---
     else if (subject) {
       const collection = db.collection("assets");
 
-      // 1. Search for filename that CONTAINS the subject text (Case Insensitive)
-      // e.g. "CST402" will match "CST402.pdf" or "CST402"
-      // Note: We use $regex for partial matching
-      const asset = await collection.findOne({ 
-        filename: { $regex: subject, $options: 'i' } 
-      });
+      // Build the Search Query
+      let dbQuery = {
+        filename: { $regex: subject, $options: 'i' } // Always match name
+      };
+
+      // If Unity sends a specific branch (and it's not "All"), filter by it
+      if (branch && branch !== "All") {
+        dbQuery.branch = branch; 
+      }
+
+      // If Unity sends a specific semester (and it's not "All"), filter by it
+      if (semester && semester !== "All") {
+        dbQuery.semester = semester;
+      }
+
+      const asset = await collection.findOne(dbQuery);
 
       if (asset) {
         res.status(200).json({
@@ -80,13 +83,15 @@ export default async function handler(req, res) {
           mode: "asset_search",
           filename: asset.filename,
           glb_url: asset.glb_url || "",
-          pdf_url: asset.pdf_url || ""
+          pdf_url: asset.pdf_url || "",
+          branch: asset.branch || "",    // Send back for debugging
+          semester: asset.semester || "" // Send back for debugging
         });
       } else {
         res.status(200).json({ 
           found: false, 
           mode: "asset_search", 
-          error: "Subject not found in database" 
+          error: "No matching subject found for this Branch/Semester." 
         });
       }
     }
