@@ -1,4 +1,4 @@
-// Update: Testing Branch Filters
+// Update: Hologram Carousel Array Fetch
 const { MongoClient } = require('mongodb');
 
 const uri = "mongodb+srv://faisvc916_db_user:fayizvc123@cluster0.kqm7txf.mongodb.net/?retryWrites=true&w=majority";
@@ -13,13 +13,10 @@ export default async function handler(req, res) {
 
     // --- MODE A: GPS CHECK ---
     if (lat && lon) {
-      // (Keep existing GPS logic here - no changes needed)
       const collection = db.collection("colleges");
       const documents = await collection.find({}).toArray();
-      // ... [Keep your existing Haversine distance logic] ...
-      // For brevity, I'm assuming you keep the GPS code we wrote previously!
-      // If you need the full GPS block again, let me know.
-       let minDistance = 500000;
+      
+      let minDistance = 500000;
       let nearestCollege = null;
       const userLat = parseFloat(lat);
       const userLon = parseFloat(lon);
@@ -59,17 +56,17 @@ export default async function handler(req, res) {
       }
     } 
     
-    // --- MODE B: ASSET SEARCH (UPDATED FILTER) ---
+    // --- MODE B: ASSET SEARCH (CAROUSEL MODE) ---
     else if (subject) {
       const collection = db.collection("assets");
 
       let dbQuery = {
+        // Find any document where filename contains the subject (e.g., "ECT301")
         filename: { $regex: subject, $options: 'i' } 
       };
 
       // STRICT FILTER: Only return if branch/sem match
       if (branch && branch !== "All") {
-        // "regex" with "i" makes it Case Insensitive (CSE == cse)
         dbQuery.branch = { $regex: new RegExp("^" + branch + "$", "i") };
       }
 
@@ -77,21 +74,24 @@ export default async function handler(req, res) {
         dbQuery.semester = { $regex: new RegExp("^" + semester + "$", "i") };
       }
 
-      const asset = await collection.findOne(dbQuery);
+      // 1. Fetch ALL matching modules and sort them alphabetically
+      // (This ensures "ECT301_M1" comes before "ECT301_M2")
+      const assets = await collection.find(dbQuery).sort({ filename: 1 }).toArray();
 
-      if (asset) {
+      // 2. Return an array of all matched assets
+      if (assets.length > 0) {
         res.status(200).json({
           found: true,
           mode: "asset_search",
-          filename: asset.filename,
-          glb_url: asset.glb_url || "",
-          pdf_url: asset.pdf_url || "",
-          branch: asset.branch,
-          semester: asset.semester
+          assets: assets.map(a => ({
+            filename: a.filename,
+            glb_url: a.glb_url || "",
+            pdf_url: a.pdf_url || "",
+            branch: a.branch,
+            semester: a.semester
+          }))
         });
       } else {
-        // If filters don't match, we return false. 
-        // Unity will see this and NOT show the 3D card.
         res.status(200).json({ 
           found: false, 
           mode: "asset_search", 
